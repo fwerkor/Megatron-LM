@@ -489,6 +489,12 @@ def _warmup_jit_function(tp_size=None):
     else:
         dtype = torch.float32
 
+    # Warmup runs after _set_random_seed and its torch.rand draws consume the
+    # default CUDA RNG stream shared with training. Snapshot the state here and
+    # restore it before returning so that skipping any warmup block below never
+    # shifts the RNG stream seen by the rest of the program.
+    prev_cuda_rng_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+
     # Check if TE activation function is used (in which case, no need to warmup custom fusions)
     use_te_activation_func = getattr(args, 'use_te_activation_func', False)
     gated_linear_unit = getattr(args, 'gated_linear_unit', False)
@@ -609,6 +615,9 @@ def _warmup_jit_function(tp_size=None):
             for _ in range(5):
                 output = bias_dropout_add_fused_train([input, bias], residual, dropout_rate)
         del bias, input, residual, output
+
+    if prev_cuda_rng_states is not None:
+        torch.cuda.set_rng_state_all(prev_cuda_rng_states)
     torch.cuda.empty_cache()
 
 
